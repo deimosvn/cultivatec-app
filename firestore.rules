@@ -1,90 +1,89 @@
 rules_version = '2';
 
-// ================================================================
-// FIRESTORE SECURITY RULES — CultivaTec App
-// ================================================================
-// Copia estas reglas en Firebase Console:
-// Firestore Database > Reglas
-// ================================================================
-
+// CultivaTec — Firestore security rules for project `cultivatec-appstore`.
+// Mirrors the collections used by the app (users, usernames, userScores,
+// friendRequests, friends, leagues).
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ---- Función helper: ¿es admin? ----
-    function isAdmin() {
-      return request.auth.token.email in [
-        'diego.martinez111213@gmail.com',
-        'ing.abrahamdonate@gmail.com'
-      ];
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+    // Allows another signed-in user to bump only social counters on someone
+    // else's profile (used when accepting/removing friends).
+    function onlySocialCounterChange() {
+      return isSignedIn() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['friendsCount', 'lastActive']);
     }
 
-    // --- Perfiles de usuario ---
-    match /users/{userId} {
-      // Cualquiera autenticado puede leer perfiles (para ranking/amigos)
-      allow read: if request.auth != null;
-      // Solo el propio usuario puede crear su perfil
-      allow create: if request.auth != null && request.auth.uid == userId;
-      // Actualizar: propio usuario, admin, o solo friendsCount (para aceptar/eliminar amigos)
-      allow update: if request.auth != null && (
-        request.auth.uid == userId ||
-        isAdmin() ||
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['friendsCount'])
-      );
-      // Eliminar: solo admin
-      allow delete: if request.auth != null && isAdmin();
+    // ---- User profiles -----------------------------------------------------
+    // Readable by any signed-in user (ranking, friend search, friend lists).
+    // Writable only by the owner (others may only touch social counters).
+    match /users/{uid} {
+      allow read:   if isSignedIn();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) || onlySocialCounterChange();
+      allow delete: if false;
     }
 
-    // --- Usernames (unicidad) ---
-    match /usernames/{username} {
-      // Lectura pública: necesario para verificar disponibilidad ANTES de crear cuenta
-      allow read: if true;
-      allow create: if request.auth != null;
-      // Solo admin puede borrar usernames (al eliminar cuentas)
-      allow delete: if request.auth != null && isAdmin();
+    // ---- Username registry -------------------------------------------------
+    // Public read so username availability + username→email login work before
+    // authentication. A user may only reserve a username for their own uid.
+    match /usernames/{name} {
+      allow read:   if true;
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
     }
 
-    // --- Scores de usuario ---
-    match /userScores/{userId} {
-      // Cualquier autenticado puede leer (para ranking global)
-      allow read: if request.auth != null;
-      // Propio usuario o admin puede escribir/eliminar
-      allow write: if request.auth != null && (
-        request.auth.uid == userId || isAdmin()
-      );
+    // ---- Per-user module / quiz scores ------------------------------------
+    match /userScores/{uid} {
+      allow read:  if isSignedIn();
+      allow write: if isOwner(uid);
     }
 
-    // --- Solicitudes de amistad ---
-    match /friendRequests/{requestId} {
-      // Leer: el remitente, el destinatario, o admin
-      allow read: if request.auth != null && (
-        resource.data.fromUid == request.auth.uid ||
-        resource.data.toUid == request.auth.uid ||
-        isAdmin()
-      );
-      // Crear: cualquier usuario autenticado (como remitente)
-      allow create: if request.auth != null && request.resource.data.fromUid == request.auth.uid;
-      // Actualizar: solo el destinatario (para aceptar/rechazar)
-      allow update: if request.auth != null && resource.data.toUid == request.auth.uid;
-      // Eliminar: remitente, destinatario, o admin
-      allow delete: if request.auth != null && (
-        resource.data.fromUid == request.auth.uid ||
-        resource.data.toUid == request.auth.uid ||
-        isAdmin()
-      );
+    // ---- Friend requests ---------------------------------------------------
+    match /friendRequests/{reqId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.fromUid == request.auth.uid;
+      allow update, delete: if isSignedIn() &&
+        (resource.data.toUid == request.auth.uid || resource.data.fromUid == request.auth.uid);
     }
 
-    // --- Lista de amigos ---
-    match /friends/{userId}/list/{friendId} {
-      // Leer: propio usuario o admin
-      allow read: if request.auth != null && (
-        request.auth.uid == userId || isAdmin()
-      );
-      // Escribir: propio usuario, el amigo, o admin
-      allow write: if request.auth != null && (
-        request.auth.uid == userId ||
-        request.auth.uid == friendId ||
-        isAdmin()
-      );
+    // ---- Friends lists: friends/{uid}/list/{friendUid} --------------------
+    match /friends/{uid}/list/{friendUid} {
+      allow read:  if isSignedIn();
+      allow write: if isSignedIn() &&
+        (request.auth.uid == uid || request.auth.uid == friendUid);
+    }
+
+    // ---- Tournaments / weekly leagues (future phases) ---------------------
+    // A signed-in player may submit/update only their own entry.
+    match /leagues/{leagueId}/entries/{uid} {
+      allow read:  if isSignedIn();
+      allow write: if isOwner(uid);
+    }
+    match /leagues/{leagueId} {
+      allow read:  if isSignedIn();
+      allow write: if false; // league metadata managed server-side / by admin
+    }
+
+    // ---- Friend duels (Phase 2) -------------------------------------------
+    // Only the two players may read/update; the challenger creates it.
+    match /duels/{duelId} {
+      allow read:   if isSignedIn() && request.auth.uid in resource.data.players;
+      allow create: if isSignedIn() && request.auth.uid == request.resource.data.challengerUid;
+      allow update: if isSignedIn() && request.auth.uid in resource.data.players;
+      allow delete: if false;
+    }
+
+    // Read-only shared question bank (when migrated to Firestore).
+    match /questionBank/{doc=**} {
+      allow read:  if isSignedIn();
+      allow write: if false;
     }
   }
 }

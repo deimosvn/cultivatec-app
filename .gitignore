@@ -1,24 +1,20 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Flutter
+cultivatec_flutter/.dart_tool/
+cultivatec_flutter/build/
+cultivatec_flutter/.flutter-plugins
+cultivatec_flutter/.flutter-plugins-dependencies
+cultivatec_flutter/.packages
+cultivatec_flutter/pubspec.lock
+cultivatec_flutter/android/.gradle/
+cultivatec_flutter/android/local.properties
+cultivatec_flutter/ios/Pods/
+cultivatec_flutter/ios/.symlinks/
 
-node_modules
-dist
-dist-ssr
-*.local
+# IDE
+.idea/
+.vscode/
+*.iml
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# OS
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
